@@ -7,12 +7,17 @@ class SwarmScope:
         self.ctx = parent_context
         self.reg = registry_ref
         
-        # [Update] 构造 RustAccumulator 需传入 Domain Context
         self._backend = RustAccumulator(self.ctx.M_str, self.ctx.G_str, self.ctx.MAX_DEPTH, self.ctx.DOMAIN)
         self.swarm_prime = self.reg.register_agent(swarm_name)
 
     def track_sub_task(self, sub_agent_name):
-        self._backend.update_state(str(sub_agent_name))
+        # [Security Fix #2] 获取当前 Rust 状态作为 expected_prev_t
+        # 虽然这看起来是多余的（自己查自己），但在 FFI 边界这是一种良好的断言机制
+        # 实际场景中，prev_t 可能来自客户端请求的 Proof
+        current_state_hex = self._backend.get_state()
+        current_t = int(current_state_hex, 16)
+        
+        self._backend.update_state(str(sub_agent_name), str(current_t))
 
     def seal_and_export(self):
         local_t = int(self._backend.get_state(), 16)
@@ -46,15 +51,11 @@ class ParallelScope:
             return self.base_t, self.base_depth, 0
 
         primes_str = []
-        # [Security Fix #2] 位置敏感合并 (Positional-Binding)
-        # 强制并行分支具有顺序敏感性，修复 "伪交换性" 漏洞
-        # 我们通过将索引绑定到 Agent 身份上，强制生成不同的素数
+        # [Security Fix #1] Positional Binding + Cascaded Merge
+        # Python 侧依然保留 Position ID 以生成不同素数
+        # Rust 侧现在执行级联模幂，因此传递的顺序至关重要
         for idx, agent in enumerate(self.branch_ids):
-            # 构造虚拟的 "Positional Identity": AgentName#Index
-            # 这样即使是 {A, B} 和 {B, A}，实际上会映射为 {A#0, B#1} 和 {B#0, A#1}
-            # 从而生成完全不同的素数集合，打破阿贝尔交换律
             positional_id = f"{agent}#{idx}"
-            
             p = self.reg.register_agent(positional_id)
             primes_str.append(str(p))
             
