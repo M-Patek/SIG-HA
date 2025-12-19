@@ -1,7 +1,7 @@
 import json
 import secrets
 import uuid
-from cryptography.hazmat.primitives.asymmetric import rsa
+import time
 from holographic_core import RustAccumulator
 
 class CryptoContext:
@@ -11,24 +11,18 @@ class CryptoContext:
         
         print(f"🔧 [System] Init CryptoContext | Domain: {self.DOMAIN} | Mode: {setup_mode}")
         
-        # [Security Fix #1] Trapdoor Risk Mitigation
-        # 在生产模式下，应通过 MPC (Secure Multiparty Computation) 导入无陷门模数
-        # 这里模拟 Strong RSA 生成，并显式警告私钥销毁的重要性
-        print("🔐 [Security] Generating Strong RSA Modulus...")
-        key = rsa.generate_private_key(public_exponent=65537, key_size=bit_length)
-        pub_nums = key.public_key().public_numbers()
-        self.M = pub_nums.n
-        
-        # [Fix] G=4 in Strong RSA Group
-        # 4 = 2^2，是二次剩余。如果 p,q 是 Safe Primes，QR 子群阶数极大
-        # 这里我们假定 key generation 产生了足够好的素数
-        self.G = 4 
-        
-        # 💥 DESTROY PRIVATE KEY OBJECT IMMEDIATELY 💥
-        del key 
-            
-        self.M_str = str(self.M)
-        self.G_str = str(self.G)
+        # [Security Fix #5] 使用 Rust 侧生成的安全 RSA 模数
+        # 避免在 Python 内存中处理私钥
+        print("🔐 [Security] Delegating Safe Modulus Generation to Rust Core...")
+        try:
+            # bit_length 必须传递给 Rust
+            self.M_str = RustAccumulator.generate_safe_modulus(bit_length)
+            self.M = int(self.M_str)
+            self.G = 4
+            self.G_str = str(self.G)
+        except Exception as e:
+            print(f"🔥 [CRITICAL] Modulus generation failed: {e}")
+            raise
         
         try:
             self._prime_helper = RustAccumulator(self.M_str, self.G_str, self.MAX_DEPTH, self.DOMAIN)
@@ -42,9 +36,24 @@ class CryptoContext:
 class PrimeRegistry:
     def __init__(self, context):
         self.ctx = context
-        self.cache = {} 
+        self.cache = {}
+        # [Security Fix #4] 请求限流 (Rate Limiting)
+        self.request_log = {}
+        self.RATE_LIMIT_WINDOW = 1.0 # 1秒
+        self.MAX_REQUESTS_PER_WINDOW = 100 
     
     def register_agent(self, agent_id):
+        # DoS Protection: Rate Limiting
+        now = time.time()
+        # 简单清理过期记录
+        self.request_log = {k: v for k, v in self.request_log.items() if now - v < self.RATE_LIMIT_WINDOW}
+        
+        # 全局限流 (简单实现，实际应针对 IP 或 Session)
+        if len(self.request_log) > self.MAX_REQUESTS_PER_WINDOW:
+             raise RuntimeError("Rate Limit Exceeded: Too many prime generation requests")
+        
+        self.request_log[agent_id] = now
+
         if agent_id in self.cache:
             return self.cache[agent_id]
         
@@ -71,7 +80,11 @@ class HolographicAccumulator:
 
     def update_state(self, agent_id):
         try:
-            t_next_str = self._backend.update_state(str(agent_id))
+            # [Security Fix #2] 传递 expected_prev_t 防止回滚
+            t_next_str = self._backend.update_state(
+                str(agent_id), 
+                str(self.current_T)
+            )
             self.current_T = int(t_next_str)
             self.depth = self._backend.get_depth()
             
@@ -94,16 +107,16 @@ class SnapshotAccumulator(HolographicAccumulator):
         super().__init__(context)
         self.snapshot_store = []
         self.segment_id = 0
-        # [Fix #4] Chain Genesis Hash
         self.last_snapshot_hash = "0" * 64 
         
     def update_state_with_check(self, agent_id, agent_prime=None):
         try:
-            # [Fix #4] 传入 last_snapshot_hash 形成链式结构
+            # [Security Fix #2] 同样传递 expected_prev_t
             new_t_str, is_folded, snapshot_data = self._backend.update_with_snapshot(
                 str(agent_id), 
                 self.segment_id,
-                self.last_snapshot_hash
+                self.last_snapshot_hash,
+                str(self.current_T) 
             )
             
             self.current_T = int(new_t_str)
@@ -113,7 +126,6 @@ class SnapshotAccumulator(HolographicAccumulator):
                 block = json.loads(snapshot_data)
                 block["timestamp"] = __import__("time").time()
                 
-                # 验证链完整性
                 if block.get("prev_hash") != self.last_snapshot_hash:
                      raise RuntimeError("Snapshot Chain Integrity Violation!")
                      
