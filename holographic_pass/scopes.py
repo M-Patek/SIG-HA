@@ -8,9 +8,7 @@ class SwarmScope:
         self.reg = registry_ref
         
         # [Update] 构造 RustAccumulator 需传入 Domain Context
-        # Swarm 继承父 Context 的 Domain，确保同一应用下的身份隔离一致性
         self._backend = RustAccumulator(self.ctx.M_str, self.ctx.G_str, self.ctx.MAX_DEPTH, self.ctx.DOMAIN)
-        
         self.swarm_prime = self.reg.register_agent(swarm_name)
 
     def track_sub_task(self, sub_agent_name):
@@ -48,9 +46,16 @@ class ParallelScope:
             return self.base_t, self.base_depth, 0
 
         primes_str = []
-        for agent in self.branch_ids:
-            # 这里的 register_agent 已经隐式使用了 Domain 前缀
-            p = self.reg.register_agent(agent)
+        # [Security Fix #2] 位置敏感合并 (Positional-Binding)
+        # 强制并行分支具有顺序敏感性，修复 "伪交换性" 漏洞
+        # 我们通过将索引绑定到 Agent 身份上，强制生成不同的素数
+        for idx, agent in enumerate(self.branch_ids):
+            # 构造虚拟的 "Positional Identity": AgentName#Index
+            # 这样即使是 {A, B} 和 {B, A}，实际上会映射为 {A#0, B#1} 和 {B#0, A#1}
+            # 从而生成完全不同的素数集合，打破阿贝尔交换律
+            positional_id = f"{agent}#{idx}"
+            
+            p = self.reg.register_agent(positional_id)
             primes_str.append(str(p))
             
         t_final_str, next_depth, ops_cost = self._computer.safe_merge_branches(
