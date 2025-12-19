@@ -1,6 +1,6 @@
 [package]
 name = "holographic_core"
-version = "0.1.0"
+version = "0.2.0" # Version Bump
 edition = "2021"
 
 [lib]
@@ -8,11 +8,9 @@ name = "holographic_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-# PyO3 用于 Python 绑定
 pyo3 = { version = "0.20.0", features = ["extension-module", "abi3-py37"] }
-# Rug 是基于 GMP 的高性能大数库，指南中的性能之选
 rug = { version = "1.24", features = ["integer", "serde"] }
-# SHA2 用于 Hash-to-Prime
 sha2 = "0.10"
-# Hex 用于调试输出
 hex = "0.4"
+# [Security Fix #1] 引入随机库用于实现 Timing Jitter
+rand = "0.8"
