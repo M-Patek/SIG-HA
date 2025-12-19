@@ -1,11 +1,4 @@
-构建工具 (用于编译 Rust 扩展 holographic_core)
-
 maturin>=1.0.0
-
-数学库 (security.py 等模块仍需使用)
-
 sympy>=1.12
-
-可选：如果需要开发/调试
-
+cryptography>=41.0.0
 pytest
