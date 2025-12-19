@@ -6,11 +6,14 @@ class SwarmScope:
         self.swarm_name = swarm_name
         self.ctx = parent_context
         self.reg = registry_ref
-        self._backend = RustAccumulator(self.ctx.M_str, self.ctx.G_str, self.ctx.MAX_DEPTH)
+        
+        # [Update] 构造 RustAccumulator 需传入 Domain Context
+        # Swarm 继承父 Context 的 Domain，确保同一应用下的身份隔离一致性
+        self._backend = RustAccumulator(self.ctx.M_str, self.ctx.G_str, self.ctx.MAX_DEPTH, self.ctx.DOMAIN)
+        
         self.swarm_prime = self.reg.register_agent(swarm_name)
 
     def track_sub_task(self, sub_agent_name):
-        # 任何错误 (FFI Validation, DoS) 都会在这里抛出
         self._backend.update_state(str(sub_agent_name))
 
     def seal_and_export(self):
@@ -29,34 +32,27 @@ class SwarmScope:
         }
 
 class ParallelScope:
-    """
-    [Phase 2.3] 并行路径合并算子 (Safe Rust Version with Complexity Tracking)
-    """
     def __init__(self, context, registry_ref, base_t, current_depth):
         self.ctx = context
         self.reg = registry_ref
         self.base_t = base_t
         self.base_depth = current_depth
         self.branch_ids = []
-        # 借用 Context 的 helper 进行计算
         self._computer = self.ctx._prime_helper 
 
     def add_branch_result(self, agent_name):
         self.branch_ids.append(agent_name)
 
     def merge(self):
-        """
-        返回: (new_t, new_depth, ops_cost)
-        """
         if not self.branch_ids:
             return self.base_t, self.base_depth, 0
 
         primes_str = []
         for agent in self.branch_ids:
+            # 这里的 register_agent 已经隐式使用了 Domain 前缀
             p = self.reg.register_agent(agent)
             primes_str.append(str(p))
             
-        # [Security Fix #1] 获取 Rust 返回的精确 Ops Cost
         t_final_str, next_depth, ops_cost = self._computer.safe_merge_branches(
             str(self.base_t), 
             primes_str, 
