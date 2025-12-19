@@ -23,7 +23,7 @@ class StateSealer:
         integrity_seal = hashlib.sha256(anchor_raw.encode()).hexdigest()
         
         return {
-            "version": "v3.0-secure-audit",
+            "version": "v4.0-hardened",
             "header": {
                 "trace_t": str(current_t),
                 "integrity_seal": integrity_seal,
@@ -67,16 +67,12 @@ class TraceInspector:
         simulated_depth = 0
         ops_counter = 0
         
-        # [Update] 验证逻辑需适配 Positional Binding
-        # 如果是并行列表，验证者也需要知道合并顺序
-        # 这里简化为线性验证，假设 witnesses 已经是展平的序列
-        
         for agent_name in claimed_witness_list:
-            # 注意：实际验证中，这里需要根据日志上下文判断是否需要加 Index 后缀
-            # 为了演示，我们假设 verify_path 只验证主链上的标准 Agent
             p = self.reg.get_prime(agent_name)
             if not p: return False, f"Unknown agent: {agent_name}"
             
+            # [Security Fix #4] 使用 ctx.fast_pow (Rust FFI) 加速验证
+            # 原生的 pow(a,b,m) 在 2048 位下太慢，易遭 DoS
             path_term = self.ctx.fast_pow(simulated_t, p)
             ops_counter += 1
             
@@ -90,8 +86,6 @@ class TraceInspector:
             if ops_counter > 5000: 
                 return False, "DoS Protection: Verification Complexity Threshold Exceeded"
             
-        # [Security Fix #4] Zero-Tolerance Ops Audit
-        # 移除 5% 误差容忍，要求精确匹配
         if envelope_header and 'ops' in envelope_header:
              claimed_ops = int(envelope_header['ops'])
              if claimed_ops != ops_counter:
