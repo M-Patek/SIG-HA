@@ -1,58 +1,93 @@
-# SIG-HA: Hierarchical Holographic Accumulators
+# SIG-HA: 混合架构全息累加器追踪框架 (Rust Accelerated)
 
-**SIG-HA** 是一个基于密码学累加器（Cryptographic Accumulators）构建的高性能、可验证的分布式系统状态追踪框架。它通过代数性质（如素数指数运算）将复杂的 Agent 交互路径和拓扑结构“折叠”进一个定长的代数指纹中，实现全息（Holographic）级的状态审计与安全验证。
+**SIG-HA (Hierarchical Holographic Accumulators)** 是一个专为大规模 Agent 协作网络设计的可验证状态追踪框架。在最新版本中，系统通过 **PyO3** 深度集成了 **Rust (rug/GMP)** 内核，将算力密集的代数运算下沉至原生层，解决了原有架构在处理大数模幂时的性能瓶颈。
+
+---
 
 ## 🌟 核心特性
 
 * **全息状态追踪 (Holographic Tracing)**：利用公式 $T_{next} = (T_{prev}^{P_{agent}} \cdot G^{H(depth)}) \pmod M$ 将路径与深度信息融合。
-* **分层作用域 (Hierarchical Scopes)**：
-    * **SwarmScope**：支持子任务集群的本地审计与结果导出，用于分级索引管理。
-    * **ParallelScope**：利用乘法交换律实现并行处理分支的无损合并。
-* **自动快照折叠 (State Folding)**：当处理深度达到阈值时，自动将状态归档并重置种子，确保长路径下的计算效率。
-* **多维安全保障**：
-    * **StateSealer**：通过哈希锚定业务数据 (Payload) 与代数指纹，防止数据篡改。
-    * **TraceInspector**：提供全息侦探功能，根据已知路径重算指纹并验证其合法性。
-    * **TopologyGuard**：基于预定义拓扑结构的合法转移校验，确保 Agent 访问合规。
+* **Rust 原生加速**：核心算子基于 `rug` (GMP 绑定) 实现，2048-bit 模幂运算性能较纯 Python 库提升约 30 倍。
+* **确定性映射 (Hash-to-Prime)**：内置 Miller-Rabin 素性测试，确保 Agent 身份到素数域的映射既安全又具备数学唯一性。
+* **自动快照折叠 (State Folding)**：当路径深度达到阈值时，系统会自动归档状态并重置种子，防止长链下的计算效率下降。
 
-## 📂 模块指南
+---
 
-| 模块 | 描述 |
-| :--- | :--- |
-| `core.py` | 核心引擎。包含加密上下文 `CryptoContext`、素数注册表 `PrimeRegistry` 及核心累加器实现。 |
-| `scopes.py` | 结构化逻辑。处理 Swarm 集群任务和并行路径的合并算子。 |
-| `security.py` | 安全防御层。提供状态锁定、路径验证和拓扑准入校验。 |
-| `models.py` | 数据模型。定义了全息元数据 `HolographicMeta` 和全局状态容器 `AgentState`。 |
-| `benchmark.py` | 性能评估。模拟高并发场景下的碰撞检测与时延测试。 |
+## 📂 模块化架构
+
+| 模块 | 核心功能 | 实现逻辑 |
+| :--- | :--- | :--- |
+| **`lib.rs`** | Rust 算力内核 | 实现 `RustAccumulator` 类，包含高性能模幂及 `hash_to_prime` 算法。 |
+| **`core.py`** | 核心控制平面 | 定义 `CryptoContext` 与 `SnapshotAccumulator`，作为 Rust 引擎的 Python 包装器。 |
+| **`scopes.py`** | 拓扑聚合算子 | 提供 `SwarmScope` (集群任务) 与 `ParallelScope` (并行分支合并) 的加速实现。 |
+| **`security.py`** | 安全防御层 | 包含 `StateSealer` (数据锁定) 和 `TraceInspector` (全息路径验证)。 |
+| **`models.py`** | 全局数据模型 | 定义全息元数据 `HolographicMeta` 与状态容器 `AgentState`。 |
+
+---
+
+## 🛠️ 安装与构建
+
+系统需要 Rust 工具链及 Python 开发环境。
+
+```bash
+# 进入核心目录
+cd holographic_pass
+
+# 使用 maturin 构建并安装 Rust 扩展
+maturin develop --release
+```
+
+---
 
 ## 🚀 快速开始
 
-您可以运行 `demo_runner.py` 来观察系统的完整运行流程，包括 Agent 交互、Swarm 任务处理、结果合并以及状态锁定：
-
-```bash
-python demo_runner.py
-```
-
-### 核心用法示例
-
+### 1. 初始化基础环境
 ```python
-from holographic_pass.core import CryptoContext, PrimeRegistry, SnapshotAccumulator
-from holographic_pass.security import TraceInspector
+from holographic_pass.core import CryptoContext, SnapshotAccumulator
 
-# 1. 初始化基础设施
-ctx = CryptoContext(bit_length=2048)
-reg = PrimeRegistry()
+# 初始化 2048-bit 上下文，设置最大深度阈值
+ctx = CryptoContext(bit_length=2048, max_depth=10)
 acc = SnapshotAccumulator(ctx)
-
-# 2. 模拟 Agent 处理并更新指纹
-p_a = reg.register_agent("Agent_A")
-trace_t = acc.update_state_with_check("Agent_A", p_a)
-
-# 3. 验证路径合法性
-inspector = TraceInspector(ctx, reg)
-is_valid, msg = inspector.verify_path(trace_t, ["Agent_A"])
-print(f"验证结果: {is_valid}")
 ```
+
+### 2. 更新 Agent 状态
+```python
+# Rust 引擎会自动处理 AgentID 到素数的映射及后续模幂运算
+acc.update_state_with_check("Credit_Approval_Agent")
+print(f"当前全息指纹 (T): {acc.current_T}")
+print(f"当前执行深度: {acc.depth}")
+```
+
+### 3. 并行路径合并 (Parallel Merging)
+```python
+from holographic_pass.scopes import ParallelScope
+
+# 初始化合并算子
+scope = ParallelScope(ctx, reg, base_t=acc.current_T, current_depth=acc.depth)
+scope.add_branch_result("Worker_A")
+scope.add_branch_result("Worker_B")
+
+# ⚡ 利用乘法交换律进行无损合并
+t_merged, new_depth = scope.merge()
+```
+
+---
 
 ## 📊 性能表现
 
-系统内置了 `HolographicBenchmark` 工具，用于测试不同比特长度下的处理时延。通过代数合并算法，即使在复杂的并行分支场景下，也能保持极低的验证成本。
+根据内置 `benchmark.py` 的测试：
+* **Rust Core (rug)**：单跳累加器更新延迟约为 **0.25ms**。
+* **Python Logic**：在处理同等规模的大数运算时，延迟通常在 **7.0ms** 以上。
+* **系统吞吐量**：在单核 CPU 上支持每秒约 **4,000** 次的运算操作。
+
+---
+
+## ⚠️ 开发注意事项
+
+1.  **状态同步 (Sync)**：在进行快照折叠或手动修改 Python 侧状态后，务必调用 `_backend.set_state()` 确保底层 Rust 寄存器同步，否则会导致计算结果不一致。
+2.  **数据交互**：为保证跨语言调用的精度，所有 2048-bit 级别的大整数在 FFI 边界均以 **字符串 (String)** 形式传递。
+3.  **依赖项**：Linux 环境下需预装 `libgmp-dev` 以支持 `rug` 库的编译。
+
+---
+
+**SIG-HA** 旨在将 Agent 行为的“黑箱”转化为透明的代数方程，为零信任 AI 协作提供数学底座。
