@@ -1,4 +1,4 @@
-# HA-DTS 协议白皮书：面向群体智能的可验证拓扑隐写框架
+# HA-DTS 协议白皮书：面向群体智能的可验证拓扑隐写框架（Ongoing）
 **Holographic Accumulator for Distributed Topology Steganography**
 
 ---
