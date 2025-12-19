@@ -5,11 +5,14 @@ from holographic_pass.security import StateSealer, TraceInspector, TopologyGuard
 from holographic_pass.benchmark import HolographicBenchmark
 
 def main():
-    print("🐱 === Holographic Pass System Demo === 🐱\n")
+    print("🐱 === Holographic Pass System Demo (Rust Accelerated) === 🐱\n")
     
     # 1. 初始化基础设施
+    # [Update] CryptoContext 现在会初始化 Rust 引擎
     ctx = CryptoContext(bit_length=2048, max_depth=5)
-    reg = PrimeRegistry()
+    
+    # [Update] PrimeRegistry 现在需要传入 context 实例
+    reg = PrimeRegistry(ctx)
     acc = SnapshotAccumulator(ctx)
     inspector = TraceInspector(ctx, reg)
     
@@ -18,7 +21,7 @@ def main():
     print(f"📝 任务开始: {state.payload}")
     
     # 3. 模拟标准流程: Agent_A -> Agent_B
-    # Agent A 处理
+    # Rust 驱动的 hash_to_prime 确保了这里得到的 ID 是确定性的
     p_a = reg.register_agent("Agent_A")
     state.meta.trace_t = acc.update_state_with_check("Agent_A", p_a)
     state.meta.path_log.append("Agent_A")
@@ -32,6 +35,7 @@ def main():
     
     # 4. 模拟 Swarm 集群处理 (Agent_C 是一群猫)
     print("\n🏰 进入 Swarm 'Research_Team'...")
+    # SwarmScope 内部也已经优化，使用独立 Rust 实例
     swarm = SwarmScope("Research_Team", ctx, reg)
     swarm.track_sub_task("Sub_Cat_1")
     swarm.track_sub_task("Sub_Cat_2")
@@ -39,8 +43,7 @@ def main():
     # 结算 Swarm
     result = swarm.seal_and_export()
     
-    # 将 Swarm 结果合并回主链
-    # 注意：这里需要手动更新 state 中的 trace_t
+    # 将 Swarm 结果合并回主链 (调用了优化后的 update_global_with_swarm)
     new_global_t = update_global_with_swarm(acc, result)
     state.meta.trace_t = new_global_t
     state.meta.depth = acc.depth
@@ -57,6 +60,9 @@ def main():
     # 6. 运行压力测试
     print("\n🚀 运行基准测试...")
     bm = HolographicBenchmark(ctx, reg)
+    # 运行新的系统级测试
+    bm.run_system_test(iterations=100)
+    # 运行原有的模拟验证
     bm.run(iterations=50)
 
     print("\n😺 所有演示结束，系统运行完美！")
